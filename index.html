@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>電卓</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background: #f0f0f0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    .calculator {
+      background: #1e1e1e;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      width: 280px;
+    }
+
+    .display {
+      background: #2a2a2a;
+      border-radius: 10px;
+      padding: 16px 20px;
+      margin-bottom: 20px;
+      text-align: right;
+      min-height: 80px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+    }
+
+    .display .expression {
+      color: #888;
+      font-size: 14px;
+      min-height: 20px;
+      word-break: break-all;
+    }
+
+    .display .current {
+      color: #fff;
+      font-size: 36px;
+      font-weight: 300;
+      word-break: break-all;
+      line-height: 1.2;
+    }
+
+    .buttons {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+    }
+
+    button {
+      border: none;
+      border-radius: 10px;
+      font-size: 20px;
+      font-weight: 400;
+      height: 56px;
+      cursor: pointer;
+      transition: filter 0.1s, transform 0.1s;
+      outline: none;
+    }
+
+    button:active {
+      filter: brightness(1.3);
+      transform: scale(0.95);
+    }
+
+    .btn-number {
+      background: #3a3a3a;
+      color: #fff;
+    }
+
+    .btn-operator {
+      background: #f4a629;
+      color: #fff;
+    }
+
+    .btn-clear {
+      background: #a0a0a0;
+      color: #1e1e1e;
+      font-weight: 600;
+    }
+
+    .btn-equals {
+      background: #f4a629;
+      color: #fff;
+    }
+
+    .btn-zero {
+      grid-column: span 2;
+      text-align: left;
+      padding-left: 22px;
+    }
+
+    .history {
+      margin-bottom: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-height: 0;
+    }
+
+    .history-item {
+      background: #2a2a2a;
+      border-radius: 8px;
+      padding: 6px 14px;
+      text-align: right;
+      cursor: pointer;
+      transition: background 0.15s;
+      line-height: 1.3;
+    }
+
+    .history-item:hover { background: #383838; }
+
+    .history-item .h-expr {
+      color: #666;
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .history-item .h-result {
+      color: #bbb;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="calculator">
+    <div class="history" id="history"></div>
+    <div class="display">
+      <div class="expression" id="expression"></div>
+      <div class="current" id="current">0</div>
+    </div>
+    <div class="buttons">
+      <button class="btn-clear"    data-action="clear">C</button>
+      <button class="btn-clear"    data-action="sign">+/-</button>
+      <button class="btn-clear"    data-action="percent">%</button>
+      <button class="btn-operator" data-op="/">÷</button>
+
+      <button class="btn-number" data-digit="7">7</button>
+      <button class="btn-number" data-digit="8">8</button>
+      <button class="btn-number" data-digit="9">9</button>
+      <button class="btn-operator" data-op="*">×</button>
+
+      <button class="btn-number" data-digit="4">4</button>
+      <button class="btn-number" data-digit="5">5</button>
+      <button class="btn-number" data-digit="6">6</button>
+      <button class="btn-operator" data-op="-">−</button>
+
+      <button class="btn-number" data-digit="1">1</button>
+      <button class="btn-number" data-digit="2">2</button>
+      <button class="btn-number" data-digit="3">3</button>
+      <button class="btn-operator" data-op="+">+</button>
+
+      <button class="btn-number btn-zero" data-digit="0">0</button>
+      <button class="btn-number"  data-action="dot">.</button>
+      <button class="btn-equals"  data-action="equals">=</button>
+    </div>
+  </div>
+
+  <script src="calculator.js"></script>
+  <script>
+    // ---------- ステートマシン ----------
+    const S = { INITIAL: 'INITIAL', ENTERING: 'ENTERING', OPERATOR: 'OPERATOR', RESULT: 'RESULT' };
+    const SYMBOLS = { '+': '+', '-': '−', '*': '×', '/': '÷' };
+
+    class CalcStateMachine {
+      constructor(calc) {
+        this.calc = calc;
+        this.reset();
+      }
+
+      reset() {
+        this.state      = S.INITIAL;
+        this.current    = '0';
+        this.previous   = null;
+        this.operator   = null;
+        this.lastOp     = null;  // = を繰り返すための記憶
+        this.lastOperand= null;
+        this.expression = '';
+      }
+
+      // 各入力に対してどの遷移が有効かをここで一元管理する
+      inputDigit(d) {
+        if (this.state === S.INITIAL || this.state === S.OPERATOR) {
+          this.current = d;
+          this.state = S.ENTERING;
+        } else if (this.state === S.ENTERING) {
+          if (this.current.length < 12)
+            this.current = this.current === '0' ? d : this.current + d;
+        } else if (this.state === S.RESULT) {
+          this.current = d;
+          this.previous = null; this.operator = null; this.expression = '';
+          this.state = S.ENTERING;
+        }
+      }
+
+      inputDot() {
+        if (this.state === S.INITIAL || this.state === S.OPERATOR) {
+          this.current = '0.';
+          this.state = S.ENTERING;
+        } else if (this.state === S.ENTERING) {
+          if (!this.current.includes('.')) this.current += '.';
+        } else if (this.state === S.RESULT) {
+          this.current = '0.';
+          this.previous = null; this.operator = null; this.expression = '';
+          this.state = S.ENTERING;
+        }
+      }
+
+      inputOperator(op) {
+        if (this.state === S.INITIAL || this.state === S.RESULT) {
+          this.previous = parseFloat(this.current);
+        } else if (this.state === S.ENTERING) {
+          if (this.previous !== null && this.operator !== null) {
+            // 連続演算: 先に計算してから次の演算子を受け付ける
+            try {
+              const r = this.calc.compute(this.operator, this.previous, parseFloat(this.current));
+              this.previous = r; this.current = String(r);
+            } catch { this._error(); return; }
+          } else {
+            this.previous = parseFloat(this.current);
+          }
+        } else if (this.state === S.OPERATOR) {
+          // 演算子の変更のみ（他は何もしない）
+          this.operator = op;
+          this.expression = this.previous + ' ' + SYMBOLS[op];
+          return;
+        }
+        this.operator = op;
+        this.expression = this.previous + ' ' + SYMBOLS[op];
+        this.state = S.OPERATOR;
+      }
+
+      inputEquals() {
+        if (this.state === S.ENTERING && this.previous !== null && this.operator !== null) {
+          const curr = parseFloat(this.current);
+          this.lastOp = this.operator; this.lastOperand = curr;
+          this._computeAndSetResult(this.previous, this.operator, curr);
+        } else if (this.state === S.RESULT && this.lastOp !== null) {
+          // = を連打すると最後の演算を繰り返す
+          const prev = parseFloat(this.current);
+          this._computeAndSetResult(prev, this.lastOp, this.lastOperand);
+        }
+        // INITIAL / OPERATOR では何もしない（不正入力を無視）
+      }
+
+      toggleSign() {
+        if (this.state === S.INITIAL || this.current === 'エラー') return;
+        if (this.current !== '0')
+          this.current = this.current.startsWith('-') ? this.current.slice(1) : '-' + this.current;
+      }
+
+      percent() {
+        if (this.current === 'エラー') return;
+        const val = parseFloat(this.current);
+        if (!isNaN(val)) this.current = String(parseFloat((val / 100).toPrecision(12)));
+      }
+
+      backspace() {
+        if (this.state !== S.ENTERING) return;  // ENTERING 以外は無視
+        this.current = this.current.length > 1 ? this.current.slice(0, -1) : '0';
+      }
+
+      _computeAndSetResult(a, op, b) {
+        try {
+          const result = this.calc.compute(op, a, b);
+          this.expression = a + ' ' + SYMBOLS[op] + ' ' + b + ' =';
+          this.current = String(result);
+          this.previous = null; this.operator = null;
+          this.state = S.RESULT;
+        } catch { this._error(); }
+      }
+
+      loadResult(value) {
+        this.current = String(value);
+        this.previous = null; this.operator = null; this.expression = '';
+        this.state = S.RESULT;
+      }
+
+      _error() {
+        this.state = S.INITIAL;
+        this.current = 'エラー'; this.expression = '';
+        this.previous = null; this.operator = null;
+        this.lastOp = null; this.lastOperand = null;
+      }
+    }
+
+    // ---------- UI ----------
+    const calc = new Calculator();
+    const sm   = new CalcStateMachine(calc);
+
+    const currentEl    = document.getElementById('current');
+    const expressionEl = document.getElementById('expression');
+    const historyEl    = document.getElementById('history');
+
+    const MAX_HISTORY = 5;
+    const history = [];  // [{ expr, result }] 新しい順
+
+    function addHistory(expr, result) {
+      history.unshift({ expr, result });
+      if (history.length > MAX_HISTORY) history.pop();
+      renderHistory();
+    }
+
+    function renderHistory() {
+      historyEl.innerHTML = '';
+      history.forEach(({ expr, result }) => {
+        const item = document.createElement('div');
+        item.className = 'history-item';
+        item.innerHTML =
+          `<div class="h-expr">${expr}</div><div class="h-result">${result}</div>`;
+        item.addEventListener('click', () => {
+          sm.loadResult(result);
+          render();
+        });
+        historyEl.appendChild(item);
+      });
+    }
+
+    function render() {
+      currentEl.textContent    = sm.current;
+      expressionEl.textContent = sm.expression;
+    }
+
+    const _origEquals = sm.inputEquals.bind(sm);
+    sm.inputEquals = function() {
+      _origEquals();
+      if (this.state === S.RESULT) addHistory(this.expression, this.current);
+    };
+
+    function doEquals()     { sm.inputEquals();     render(); }
+    function doClear()      { sm.reset();           render(); }
+
+    document.querySelector('.buttons').addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      const { digit, op, action } = btn.dataset;
+      if (digit  !== undefined)  { sm.inputDigit(digit);    render(); }
+      else if (op !== undefined) { sm.inputOperator(op);    render(); }
+      else if (action === 'dot')     { sm.inputDot();       render(); }
+      else if (action === 'equals')  { doEquals(); }
+      else if (action === 'clear')   { doClear(); }
+      else if (action === 'sign')    { sm.toggleSign();     render(); }
+      else if (action === 'percent') { sm.percent();        render(); }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key >= '0' && e.key <= '9')               { sm.inputDigit(e.key);    render(); }
+      else if (e.key === '.')                          { sm.inputDot();           render(); }
+      else if (e.key === '+')                          { sm.inputOperator('+');   render(); }
+      else if (e.key === '-')                          { sm.inputOperator('-');   render(); }
+      else if (e.key === '*')                          { sm.inputOperator('*');   render(); }
+      else if (e.key === '/') { e.preventDefault();     sm.inputOperator('/');   render(); }
+      else if (e.key === 'Enter' || e.key === '=')     { doEquals(); }
+      else if (e.key === 'Escape' || e.key.toLowerCase() === 'c') { doClear(); }
+      else if (e.key === 'Backspace')                  { sm.backspace();         render(); }
+    });
+  </script>
+</body>
+</html>
